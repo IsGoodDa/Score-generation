@@ -56,66 +56,109 @@ import java.util.stream.Collectors;
 
 
 /**
+
  * 定时评价Controller
  *
  * @author huang
+ * 
  * @date 2023-02-08
+ * 
  */
 @Controller
+
 @RequestMapping("/kx/timingRate")
+
 public class KxTimingRateController extends BaseController {
+
     private final String prefix = "kx/timingRate";
+    
     @Autowired
+    
     private IKxTimingRateService kxTimingRateService;
+    
     @Autowired
+    
     private IKxTimingService kxTimingService;
+    
 
     public static boolean isEffectiveDate(Date nowTime, Date startTime, Date endTime) {
+    
         if (nowTime.getTime() == startTime.getTime()
+        
                 || nowTime.getTime() == endTime.getTime()) {
+                
             return true;
+            
         }
 
         Calendar date = Calendar.getInstance();
+        
         date.setTime(nowTime);
+        
 
         Calendar begin = Calendar.getInstance();
+        
         begin.setTime(startTime);
+        
 
         Calendar end = Calendar.getInstance();
+        
         end.setTime(endTime);
+        
 
         return date.after(begin) && date.before(end);
+        
     }
 
     //@RequiresPermissions("kx:timingRate:view")
+    
     @GetMapping()
+    
     public String timingRate() {
+    
         return prefix + "/timingRate";
+        
     }
 
     /**
+    
      * 查询定时评价列表
      */
     //@RequiresPermissions("kx:timingRate:list")
+    
     @PostMapping("/getWeek")
+    
     @ResponseBody
+    
     public AjaxResult getWeek() {
+    
 
         List<KxTiming> kxTimings = kxTimingService.selectKxTimingList(null);
+        
         KxTiming kxTiming = null;
+        
         for (KxTiming temp : kxTimings) {
+        
             if (KxTimingRateController.isEffectiveDate(new DateTime(), temp.getStartTime(), temp.getEndTime())) {
+            
                 kxTiming = temp;
+                
             }
+            
         }
         if (StringUtils.isNull(kxTiming)) {
+        
             return error("未找到符合当前时间的学期");
+            
         }
 
+
         logger.info("startTime:{}", kxTiming);
+        
         if (kxTiming.getReviewTime() == null) {
+        
             return error("期末评发布时间为空");
+            
         }
 
         return inSetTiming(kxTiming);
@@ -123,174 +166,325 @@ public class KxTimingRateController extends BaseController {
     }
 
     private AjaxResult inSetTiming(KxTiming kxTiming) {
+    
         KxTimingRate temp;
+        
         Calendar calendar = Calendar.getInstance();
+        
         calendar.setTime(kxTiming.getStartTime());
+        
 //        calendar.add(Calendar.DAY_OF_YEAR, 6);
+
         // Generate weekly
+        
         int WEEKS_PER_SEMESTER = 20;
+        
         for (int weekNum = 1; weekNum <= WEEKS_PER_SEMESTER; weekNum++) {
+        
             temp = new KxTimingRate();
+            
             temp.setType("周评");
+            
             temp.setName(kxTiming.getName() + " 第" + weekNum + "周周评");
+            
             temp.setTheTime(calendar.getTime());
+            
             logger.info("calendar:{}", calendar.getTime());
+            
             temp.setReviewId(kxTiming.getId());
+            
             calendar.add(Calendar.DAY_OF_YEAR, 7);
+            
             try {
+            
                 kxTimingRateService.insertKxTimingRate(temp);
+                
             } catch (Exception e) {
+            
                 e.printStackTrace();
+                
             }
+            
         }
         calendar = Calendar.getInstance();
+        
         calendar.setTime(kxTiming.getStartTime());
+        
 //        calendar.add(Calendar.MONTH, 1);
+
         int MONTHS_PER_SEMESTER = 4;
+        
         for (int weekNum = 1; weekNum <= MONTHS_PER_SEMESTER; weekNum++) {
+        
             temp = new KxTimingRate();
+            
             temp.setName(kxTiming.getName() + " 第" + weekNum + "月月评");
+            
             temp.setType("月评");
+            
             temp.setTheTime(calendar.getTime());
+            
             temp.setReviewId(kxTiming.getId());
+            
             calendar.add(Calendar.MONTH, 1);
+            
             try {
+            
                 kxTimingRateService.insertKxTimingRate(temp);
+                
             } catch (Exception e) {
+            
                 e.printStackTrace();
+                
             }
+            
         }
+        
         //期末评生成
+        
         temp = new KxTimingRate();
+        
         temp.setName(kxTiming.getName() + " " + "期末评");
+        
         temp.setType("期末评");
+        
         temp.setTheTime(kxTiming.getReviewTime());
+        
         temp.setReviewId(kxTiming.getId());
+        
         try {
+        
             kxTimingRateService.insertKxTimingRate(temp);
+            
         } catch (Exception e) {
+        
             e.printStackTrace();
+            
         }
+
 
         return success().put("time", new DateTime());
+        
     }
+    
 
     /**
+    
      * 查询定时评价列表
+     
      */
+     
     //@RequiresPermissions("kx:timingRate:list")
+    
     @PostMapping("/list")
+    
     @ResponseBody
+    
     public TableDataInfo list(KxTimingRate kxTimingRate) {
+    
         startPage();
+        
         List<KxTimingRate> list = kxTimingRateService.selectKxTimingRateList(kxTimingRate);
+        
         return getDataTable(list);
+        
     }
 
+
     /**
+    
      * 查询定时评价列表
+     
      */
+     
     //@RequiresPermissions("kx:timingRate:list")
+    
     @GetMapping("/select/{status}")
+    
     @ResponseBody
+    
     public AjaxResult select(@PathVariable("status") String status) {
+    
         List<KxTimingRate> list = kxTimingRateService.selectKxTimingRateList(new KxTimingRate());
+        
 
         if (status.equals("教师") || status.equals("家长")) {
+        
             List<KxTimingRate> noWeek = list.stream().filter(kxTimingRate -> !kxTimingRate.getType().equals("周评")).collect(Collectors.toList());
+            
             return success().put("rows", noWeek);
+            
         } else {
+        
             List<KxTimingRate> noReview = list.stream().filter(kxTimingRate -> !kxTimingRate.getType().equals("期末评")).collect(Collectors.toList());
+            
             return success().put("rows", noReview);
+            
         }
+        
 
     }
+    
 
     /**
+    
      * 导出定时评价列表
+     
      */
+     
     //@RequiresPermissions("kx:timingRate:export")
+    
     @Log(title = "定时评价", businessType = BusinessType.EXPORT)
+    
     @PostMapping("/export")
+    
     @ResponseBody
+    
     public AjaxResult export(KxTimingRate kxTimingRate) {
+    
         List<KxTimingRate> list = kxTimingRateService.selectKxTimingRateList(kxTimingRate);
+        
         ExcelUtil<KxTimingRate> util = new ExcelUtil<KxTimingRate>(KxTimingRate.class);
+        
         return util.exportExcel(list, "定时评价数据");
+        
     }
+    
 
     @Log(title = "定时评价", businessType = BusinessType.IMPORT)
+    
     //@RequiresPermissions("kx:timingRate:import")
+    
     @PostMapping("/importData")
+    
     @ResponseBody
+    
     public AjaxResult importData(MultipartFile file, boolean updateSupport) throws Exception {
+    
         ExcelUtil<KxTimingRate> util = new ExcelUtil<KxTimingRate>(KxTimingRate.class);
+        
         List<KxTimingRate> kxTimingRateList = util.importExcel(file.getInputStream());
+        
         String message = kxTimingRateService.importKxTimingRate(kxTimingRateList, updateSupport, getLoginName());
+        
         return AjaxResult.success(message);
+        
     }
 
     //@RequiresPermissions("kx:timingRate:view")
+    
     @GetMapping("/importTemplate")
+    
     @ResponseBody
+    
     public AjaxResult importTemplate() {
+    
         ExcelUtil<KxTimingRate> util = new ExcelUtil<KxTimingRate>(KxTimingRate.class);
+        
         return util.importTemplateExcel(" 定时评价数据");
+        
     }
 
 
     /**
+    
      * 新增定时评价
+     
      */
+     
     @GetMapping("/add")
+    
     public String add() {
+    
         return prefix + "/add";
+        
     }
+    
 
     /**
+    
      * 新增保存定时评价
+     
      */
+     
     //@RequiresPermissions("kx:timingRate:add")
+    
     @Log(title = "定时评价", businessType = BusinessType.INSERT)
+    
     @PostMapping("/add")
+    
     @ResponseBody
+    
     public AjaxResult addSave(KxTimingRate kxTimingRate) {
+    
         return toAjax(kxTimingRateService.insertKxTimingRate(kxTimingRate));
+        
     }
 
     /**
+    
      * 修改定时评价
+     
      */
+     
     //@RequiresPermissions("kx:timingRate:edit")
+    
     @GetMapping("/edit/{id}")
+    
     public String edit(@PathVariable("id") Long id, ModelMap mmap) {
+    
         KxTimingRate kxTimingRate = kxTimingRateService.selectKxTimingRateById(id);
+        
         mmap.put("kxTimingRate", kxTimingRate);
+        
         return prefix + "/edit";
+        
     }
 
+
     /**
+    
      * 修改保存定时评价
+     
      */
+     
     //@RequiresPermissions("kx:timingRate:edit")
+    
     @Log(title = "定时评价", businessType = BusinessType.UPDATE)
+    
     @PostMapping("/edit")
+    
     @ResponseBody
+    
     public AjaxResult editSave(KxTimingRate kxTimingRate) {
+    
         return toAjax(kxTimingRateService.updateKxTimingRate(kxTimingRate));
+        
     }
+    
 
     /**
+    
      * 删除定时评价
+     
      */
+     
     //@RequiresPermissions("kx:timingRate:remove")
+    
     @Log(title = "定时评价", businessType = BusinessType.DELETE)
+    
     @PostMapping("/remove")
+    
     @ResponseBody
+    
     public AjaxResult remove(String ids) {
+    
         return toAjax(kxTimingRateService.deleteKxTimingRateByIds(ids));
+        
     }
+    
 }
+
 
 
 #### 上述Java代码实现了一个简单的评分生成模块示例，它使用了一个Map来存储各个类别的评分。其中addScore()方法用于添加或更新评分，getTotalScore()方法用于获取总评分，getScoreByCategory()方法用于获取指定类别的评分。当需要添加或更新某个类别的评分时，只需要调用addScore()方法即可，当需要获取总评分或指定类别的评分时，只需要调用相应的方法即可。
