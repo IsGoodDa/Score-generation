@@ -8,184 +8,287 @@
 ## The following is an example of Java code：
 
 
-package com.ruoyi.framework.aspectj;
+package com.ruoyi.kx.controller;
 
-import java.util.ArrayList;
 
-import java.util.List;
+import cn.hutool.core.date.DateTime;
 
-import org.aspectj.lang.JoinPoint;
+import com.ruoyi.common.annotation.Log;
 
-import org.aspectj.lang.annotation.Aspect;
+import com.ruoyi.common.core.controller.BaseController;
 
-import org.aspectj.lang.annotation.Before;
+import com.ruoyi.common.core.domain.AjaxResult;
 
-import org.springframework.stereotype.Component;
+import com.ruoyi.common.core.page.TableDataInfo;
 
-import com.ruoyi.common.annotation.DataScope;
-
-import com.ruoyi.common.core.context.PermissionContextHolder;
-
-import com.ruoyi.common.core.domain.BaseEntity;
-
-import com.ruoyi.common.core.domain.entity.SysRole;
-
-import com.ruoyi.common.core.domain.entity.SysUser;
-
-import com.ruoyi.common.core.text.Convert;
-
-import com.ruoyi.common.utils.ShiroUtils;
+import com.ruoyi.common.enums.BusinessType;
 
 import com.ruoyi.common.utils.StringUtils;
 
+import com.ruoyi.common.utils.poi.ExcelUtil;
+
+import com.ruoyi.kx.domain.KxTiming;
+
+import com.ruoyi.kx.domain.KxTimingRate;
+
+import com.ruoyi.kx.service.IKxTimingRateService;
+
+import com.ruoyi.kx.service.IKxTimingService;
+
+import org.springframework.beans.factory.annotation.Autowired;
+
+import org.springframework.stereotype.Controller;
+
+import org.springframework.ui.ModelMap;
+
+import org.springframework.web.bind.annotation.*;
+
+import org.springframework.web.multipart.MultipartFile;
+
+
+import java.util.Calendar;
+
+import java.util.Date;
+
+import java.util.List;
+
+import java.util.stream.Collectors;
+
+
 /**
- * 数据过滤处理
- * 
- * @author ruoyi
+ * 定时评价Controller
+ *
+ * @author huang
+ * @date 2023-02-08
  */
-@Aspect
+@Controller
+@RequestMapping("/kx/timingRate")
+public class KxTimingRateController extends BaseController {
+    private final String prefix = "kx/timingRate";
+    @Autowired
+    private IKxTimingRateService kxTimingRateService;
+    @Autowired
+    private IKxTimingService kxTimingService;
 
-@Component
-
-public class DataScopeAspect
-{
-    /**
-     * 全部数据权限
-     */
-    public static final String DATA_SCOPE_ALL = "1";
-
-    /**
-     * 自定数据权限
-     */
-    public static final String DATA_SCOPE_CUSTOM = "2";
-
-    /**
-     * 部门数据权限
-     */
-    public static final String DATA_SCOPE_DEPT = "3";
-
-    /**
-     * 部门及以下数据权限
-     */
-    public static final String DATA_SCOPE_DEPT_AND_CHILD = "4";
-
-    /**
-     * 仅本人数据权限
-     */
-    public static final String DATA_SCOPE_SELF = "5";
-
-    /**
-     * 数据权限过滤关键字
-     */
-    public static final String DATA_SCOPE = "dataScope";
-
-    /**
-     * 数据范围过滤
-     *
-     * @param joinPoint 切点
-     * @param user 用户
-     * @param deptAlias 部门别名
-     * @param userAlias 用户别名
-     * @param permission 权限字符
-     */
-    public static void dataScopeFilter(JoinPoint joinPoint, SysUser user, String deptAlias, String userAlias, String permission)
-    {
-        StringBuilder sqlString = new StringBuilder();
-        List<String> conditions = new ArrayList<String>();
-
-        for (SysRole role : user.getRoles())
-        {
-            String dataScope = role.getDataScope();
-            if (!DATA_SCOPE_CUSTOM.equals(dataScope) && conditions.contains(dataScope))
-            {
-                continue;
-            }
-            if (StringUtils.isNotEmpty(permission) && StringUtils.isNotEmpty(role.getPermissions())
-                    && !StringUtils.containsAny(role.getPermissions(), Convert.toStrArray(permission)))
-            {
-                continue;
-            }
-            if (DATA_SCOPE_ALL.equals(dataScope))
-            {
-                sqlString = new StringBuilder();
-                break;
-            }
-            else if (DATA_SCOPE_CUSTOM.equals(dataScope))
-            {
-                sqlString.append(StringUtils.format(
-                        " OR {}.dept_id IN ( SELECT dept_id FROM sys_role_dept WHERE role_id = {} ) ", deptAlias,
-                        role.getRoleId()));
-            }
-            else if (DATA_SCOPE_DEPT.equals(dataScope))
-            {
-                sqlString.append(StringUtils.format(" OR {}.dept_id = {} ", deptAlias, user.getDeptId()));
-            }
-            else if (DATA_SCOPE_DEPT_AND_CHILD.equals(dataScope))
-            {
-                sqlString.append(StringUtils.format(
-                        " OR {}.dept_id IN ( SELECT dept_id FROM sys_dept WHERE dept_id = {} or find_in_set( {} , ancestors ) )",
-                        deptAlias, user.getDeptId(), user.getDeptId()));
-            }
-            else if (DATA_SCOPE_SELF.equals(dataScope))
-            {
-                if (StringUtils.isNotBlank(userAlias))
-                {
-                    sqlString.append(StringUtils.format(" OR {}.user_id = {} ", userAlias, user.getUserId()));
-                }
-                else
-                {
-                    // 数据权限为仅本人且没有userAlias别名不查询任何数据
-                    sqlString.append(StringUtils.format(" OR {}.dept_id = 0 ", deptAlias));
-                }
-            }
-            conditions.add(dataScope);
+    public static boolean isEffectiveDate(Date nowTime, Date startTime, Date endTime) {
+        if (nowTime.getTime() == startTime.getTime()
+                || nowTime.getTime() == endTime.getTime()) {
+            return true;
         }
 
-        if (StringUtils.isNotBlank(sqlString.toString()))
-        {
-            Object params = joinPoint.getArgs()[0];
-            if (StringUtils.isNotNull(params) && params instanceof BaseEntity)
-            {
-                BaseEntity baseEntity = (BaseEntity) params;
-                baseEntity.getParams().put(DATA_SCOPE, " AND (" + sqlString.substring(4) + ")");
-            }
-        }
+        Calendar date = Calendar.getInstance();
+        date.setTime(nowTime);
+
+        Calendar begin = Calendar.getInstance();
+        begin.setTime(startTime);
+
+        Calendar end = Calendar.getInstance();
+        end.setTime(endTime);
+
+        return date.after(begin) && date.before(end);
     }
 
-    @Before("@annotation(controllerDataScope)")
-    public void doBefore(JoinPoint point, DataScope controllerDataScope) throws Throwable
-    {
-        clearDataScope(point);
-        handleDataScope(point, controllerDataScope);
-    }
-
-    protected void handleDataScope(final JoinPoint joinPoint, DataScope controllerDataScope)
-    {
-        // 获取当前的用户
-        SysUser currentUser = ShiroUtils.getSysUser();
-        if (currentUser != null)
-        {
-            // 如果是超级管理员，则不过滤数据
-            if (!currentUser.isAdmin())
-            {
-                String permission = StringUtils.defaultIfEmpty(controllerDataScope.permission(), PermissionContextHolder.getContext());
-                dataScopeFilter(joinPoint, currentUser, controllerDataScope.deptAlias(),
-                        controllerDataScope.userAlias(), permission);
-            }
-        }
+    //@RequiresPermissions("kx:timingRate:view")
+    @GetMapping()
+    public String timingRate() {
+        return prefix + "/timingRate";
     }
 
     /**
-     * 拼接权限sql前先清空params.dataScope参数防止注入
+     * 查询定时评价列表
      */
-    private void clearDataScope(final JoinPoint joinPoint)
-    {
-        Object params = joinPoint.getArgs()[0];
-        if (StringUtils.isNotNull(params) && params instanceof BaseEntity)
-        {
-            BaseEntity baseEntity = (BaseEntity) params;
-            baseEntity.getParams().put(DATA_SCOPE, "");
+    //@RequiresPermissions("kx:timingRate:list")
+    @PostMapping("/getWeek")
+    @ResponseBody
+    public AjaxResult getWeek() {
+
+        List<KxTiming> kxTimings = kxTimingService.selectKxTimingList(null);
+        KxTiming kxTiming = null;
+        for (KxTiming temp : kxTimings) {
+            if (KxTimingRateController.isEffectiveDate(new DateTime(), temp.getStartTime(), temp.getEndTime())) {
+                kxTiming = temp;
+            }
         }
+        if (StringUtils.isNull(kxTiming)) {
+            return error("未找到符合当前时间的学期");
+        }
+
+        logger.info("startTime:{}", kxTiming);
+        if (kxTiming.getReviewTime() == null) {
+            return error("期末评发布时间为空");
+        }
+
+        return inSetTiming(kxTiming);
+
+    }
+
+    private AjaxResult inSetTiming(KxTiming kxTiming) {
+        KxTimingRate temp;
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(kxTiming.getStartTime());
+//        calendar.add(Calendar.DAY_OF_YEAR, 6);
+        // Generate weekly
+        int WEEKS_PER_SEMESTER = 20;
+        for (int weekNum = 1; weekNum <= WEEKS_PER_SEMESTER; weekNum++) {
+            temp = new KxTimingRate();
+            temp.setType("周评");
+            temp.setName(kxTiming.getName() + " 第" + weekNum + "周周评");
+            temp.setTheTime(calendar.getTime());
+            logger.info("calendar:{}", calendar.getTime());
+            temp.setReviewId(kxTiming.getId());
+            calendar.add(Calendar.DAY_OF_YEAR, 7);
+            try {
+                kxTimingRateService.insertKxTimingRate(temp);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        calendar = Calendar.getInstance();
+        calendar.setTime(kxTiming.getStartTime());
+//        calendar.add(Calendar.MONTH, 1);
+        int MONTHS_PER_SEMESTER = 4;
+        for (int weekNum = 1; weekNum <= MONTHS_PER_SEMESTER; weekNum++) {
+            temp = new KxTimingRate();
+            temp.setName(kxTiming.getName() + " 第" + weekNum + "月月评");
+            temp.setType("月评");
+            temp.setTheTime(calendar.getTime());
+            temp.setReviewId(kxTiming.getId());
+            calendar.add(Calendar.MONTH, 1);
+            try {
+                kxTimingRateService.insertKxTimingRate(temp);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        //期末评生成
+        temp = new KxTimingRate();
+        temp.setName(kxTiming.getName() + " " + "期末评");
+        temp.setType("期末评");
+        temp.setTheTime(kxTiming.getReviewTime());
+        temp.setReviewId(kxTiming.getId());
+        try {
+            kxTimingRateService.insertKxTimingRate(temp);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return success().put("time", new DateTime());
+    }
+
+    /**
+     * 查询定时评价列表
+     */
+    //@RequiresPermissions("kx:timingRate:list")
+    @PostMapping("/list")
+    @ResponseBody
+    public TableDataInfo list(KxTimingRate kxTimingRate) {
+        startPage();
+        List<KxTimingRate> list = kxTimingRateService.selectKxTimingRateList(kxTimingRate);
+        return getDataTable(list);
+    }
+
+    /**
+     * 查询定时评价列表
+     */
+    //@RequiresPermissions("kx:timingRate:list")
+    @GetMapping("/select/{status}")
+    @ResponseBody
+    public AjaxResult select(@PathVariable("status") String status) {
+        List<KxTimingRate> list = kxTimingRateService.selectKxTimingRateList(new KxTimingRate());
+
+        if (status.equals("教师") || status.equals("家长")) {
+            List<KxTimingRate> noWeek = list.stream().filter(kxTimingRate -> !kxTimingRate.getType().equals("周评")).collect(Collectors.toList());
+            return success().put("rows", noWeek);
+        } else {
+            List<KxTimingRate> noReview = list.stream().filter(kxTimingRate -> !kxTimingRate.getType().equals("期末评")).collect(Collectors.toList());
+            return success().put("rows", noReview);
+        }
+
+    }
+
+    /**
+     * 导出定时评价列表
+     */
+    //@RequiresPermissions("kx:timingRate:export")
+    @Log(title = "定时评价", businessType = BusinessType.EXPORT)
+    @PostMapping("/export")
+    @ResponseBody
+    public AjaxResult export(KxTimingRate kxTimingRate) {
+        List<KxTimingRate> list = kxTimingRateService.selectKxTimingRateList(kxTimingRate);
+        ExcelUtil<KxTimingRate> util = new ExcelUtil<KxTimingRate>(KxTimingRate.class);
+        return util.exportExcel(list, "定时评价数据");
+    }
+
+    @Log(title = "定时评价", businessType = BusinessType.IMPORT)
+    //@RequiresPermissions("kx:timingRate:import")
+    @PostMapping("/importData")
+    @ResponseBody
+    public AjaxResult importData(MultipartFile file, boolean updateSupport) throws Exception {
+        ExcelUtil<KxTimingRate> util = new ExcelUtil<KxTimingRate>(KxTimingRate.class);
+        List<KxTimingRate> kxTimingRateList = util.importExcel(file.getInputStream());
+        String message = kxTimingRateService.importKxTimingRate(kxTimingRateList, updateSupport, getLoginName());
+        return AjaxResult.success(message);
+    }
+
+    //@RequiresPermissions("kx:timingRate:view")
+    @GetMapping("/importTemplate")
+    @ResponseBody
+    public AjaxResult importTemplate() {
+        ExcelUtil<KxTimingRate> util = new ExcelUtil<KxTimingRate>(KxTimingRate.class);
+        return util.importTemplateExcel(" 定时评价数据");
+    }
+
+
+    /**
+     * 新增定时评价
+     */
+    @GetMapping("/add")
+    public String add() {
+        return prefix + "/add";
+    }
+
+    /**
+     * 新增保存定时评价
+     */
+    //@RequiresPermissions("kx:timingRate:add")
+    @Log(title = "定时评价", businessType = BusinessType.INSERT)
+    @PostMapping("/add")
+    @ResponseBody
+    public AjaxResult addSave(KxTimingRate kxTimingRate) {
+        return toAjax(kxTimingRateService.insertKxTimingRate(kxTimingRate));
+    }
+
+    /**
+     * 修改定时评价
+     */
+    //@RequiresPermissions("kx:timingRate:edit")
+    @GetMapping("/edit/{id}")
+    public String edit(@PathVariable("id") Long id, ModelMap mmap) {
+        KxTimingRate kxTimingRate = kxTimingRateService.selectKxTimingRateById(id);
+        mmap.put("kxTimingRate", kxTimingRate);
+        return prefix + "/edit";
+    }
+
+    /**
+     * 修改保存定时评价
+     */
+    //@RequiresPermissions("kx:timingRate:edit")
+    @Log(title = "定时评价", businessType = BusinessType.UPDATE)
+    @PostMapping("/edit")
+    @ResponseBody
+    public AjaxResult editSave(KxTimingRate kxTimingRate) {
+        return toAjax(kxTimingRateService.updateKxTimingRate(kxTimingRate));
+    }
+
+    /**
+     * 删除定时评价
+     */
+    //@RequiresPermissions("kx:timingRate:remove")
+    @Log(title = "定时评价", businessType = BusinessType.DELETE)
+    @PostMapping("/remove")
+    @ResponseBody
+    public AjaxResult remove(String ids) {
+        return toAjax(kxTimingRateService.deleteKxTimingRateByIds(ids));
     }
 }
 
